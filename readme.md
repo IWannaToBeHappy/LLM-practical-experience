@@ -64,11 +64,16 @@
             }
         ]
     ```
+#### self-instruct
+#### evolve instruction
 ### 数据清洗
-如何筛选高质量数据是一个难题。
+如何筛选高质量数据是一个难题.llama2的训练只用到了27,540条数据，论文直接表示"Quality is ALL You Need"。
+大模型的数据准备正走向两个分支，数量取胜的数据通常以百万起步，而质量为王的数据则不超过十万条。
 [data-juicer](https://github.com/modelscope/data-juicer)规定了一些数据清洗规则，在项目中被命名为算子，清洗依据可以分为两种，一种是基于文本特征进行清洗，如异常的字符比例，异常的重复字符，另一种是基于文本质量分类器（如GPT-3实践）对数据集进行质量评估。
+
 · **异常**的定义——3σ定律
-    ![alt text](image.png)
+    ![alt text](resource/3sigma.png)
+
 data-juicer中出现的算子被枚举在[config_all.yaml](https://github.com/modelscope/data-juicer/blob/main/configs/config_all.yaml)。以下展示部分与文本相关的算子。更多详细内容可见[data-juicer文档](https://github.com/modelscope/data-juicer/blob/main/docs)。
 ```
 Process:
@@ -117,11 +122,25 @@ Process:
       num_blocks: 6
       hamming_distance: 4
 ```
+
+另一些筛选原则基于大模型训练效果，这里做出记录，尚未进行实验验证。
+#### IFD
+IFD（Instruction-Following Difficulty）指令跟随难度，是一种量化每个样本对模型难度的筛选方法，通过评估prompt优化前后模型对问题的回答准确度来量化问题难度。若IFD分高，说明问题本身容易被模型学习理解，若IFD分数低，则说明问题对模型处于困难边界。
+#### Super filtering
+以小参数模型类比大参数模型进行筛选，筛选原理类似于前面提到的文本质量分类器。
+#### MoDS
+通过打分选择高质量数据集，聚类筛选种子数据集，使用种子数据集进行训练初始化LLM，使用拓展高质量数据集进一步进行训练。
+
+
+![alt text](resource/MoDS.png)
 ### 数据增强
 TODO
 ### 数据集灌输
 构建的数据集不能直接简单地用来训练模型，必须夹杂一定量的通识数据以使模型具备正常的对话能力，并避免模型退化。
 SFT数据占所有数据的比例建议为 **20%~40%**
+这里给出一些通识数据集库，供参考使用。
+[BAAI智源](https://data.baai.ac.cn/data)
+[hugging face](https://huggingface.co/)
 ### 对齐数据准备
 TODO
 
@@ -131,6 +150,7 @@ TODO
 [hugging face通识能力排行](https://huggingface.co/spaces/open-llm-leaderboard/open_llm_leaderboard)
 [SecBench安全能力排行](https://secbench.org/board)
 [代码生成能力排行](https://www.datalearner.com/ai-models/leaderboard/datalearner-llm-coding-leaderboard?modelSize=7b)
+[中文能力排行](https://huggingface.co/spaces/BAAI/open_cn_llm_leaderboard)
 
 **不建议使用llama3模型**，对中文的支持度较低。
 正在尝试qwen2-7B
@@ -150,10 +170,37 @@ pip install auto_gptq
 ```
 **缺陷**：因为GPTQ量化依赖于loss计算，且时间复杂度为O(N^3)，量化微调时间将显著增大。
 #### awq量化
+awq量化修改了GPTQ对权重的划分算法，在算法复杂度上与gptq一致，因此同样**需要数据集辅助**，量化后**模型大小变小。推理及训练速度显著下降**。
+```bash
+pip install autoawq
+```
+**缺陷1**：因为GPTQ量化依赖于loss计算，且时间复杂度为O(N^3)，量化微调时间将显著增大。
+**缺陷2**：autoawq库量化要求GPU算力达到7.5，V100无法满足该算力等级。
 #### hqq量化
-#### eetq量化
+hqq量化优化了bnb量化中零点与缩放倍数固定的问题，以量化和逆量化操作后的权重差异作为损失函数，以零点和缩放倍数作为参数进行训练，量化过程无需训练集辅助，量化后性能**本人尚未评估**，算力要求**尚未实践**。
+```bash
+pip install hqq
+```
+
+### 分布式训练
+常用的分布式训练框架包括Deepspeed和colossalai
+#### Deepspeed
+Deepspeed是一个深度学习框架，支持多种分布式训练策略，如DDP、ZeRO等。
+```bash
+pip install deepspeed
+```
+#### colossalai
+TODO 官方宣传其效率优于deepspeed。
+
+### 模型微调
+
 ### 模型推理
 
 ## 模型对齐
 
+## prompt优化
+
 ## 模型部署
+
+思考模型 思考过程训练（Agent），方式：读说明书，学习工具使用
+代码智能体：大模型生成思考，写代码，提交给代码生成、代码执行、返回代码结果给大模型，进行下一步迭代。
