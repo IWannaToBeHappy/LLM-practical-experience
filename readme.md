@@ -129,11 +129,11 @@ Process:
 ```
 
 另一些筛选原则基于大模型训练效果，这里做出记录，尚未进行实验验证。
-#### IFD
+#### 2.2.1 IFD
 IFD（Instruction-Following Difficulty）指令跟随难度，是一种量化每个样本对模型难度的筛选方法，通过评估prompt优化前后模型对问题的回答准确度来量化问题难度。若IFD分高，说明问题本身容易被模型学习理解，若IFD分数低，则说明问题对模型处于困难边界。
-#### Super filtering
+#### 2.2.2 Super filtering
 以小参数模型类比大参数模型进行筛选，筛选原理类似于前面提到的文本质量分类器。
-#### MoDS
+#### 2.2.3 MoDS
 通过打分选择高质量数据集，聚类筛选种子数据集，使用种子数据集进行训练初始化LLM，使用拓展高质量数据集进一步进行训练。
 
 
@@ -151,8 +151,16 @@ SFT数据占所有数据的比例建议为 **20%~40%**
 ### 2.5 对齐数据准备
 TODO
 
-## 3 模型微调
-### 3.1 模型选择
+## 3 项目框架
+一个完整的大模型微调项目，必然包含了CFT、SFT、评估、推理、部署等一系列步骤。有些框架专注于其中某一阶段，有些框架会嵌套使用其他框架，下面列出一系列了解到的框架。
+|框架名称|支持阶段|向上兼容|封装程度|特点|硬件要求|
+|---|---|---|---|---|
+|[deepspeed](https://github.com/microsoft/DeepSpeed)|训练、推理、压缩|pytorch|封装到模型载入、分布式||NVIDIA: Pascal, Volta, Ampere, and Hopper architectures AMD: MI100 and MI200|
+|[DeepSpeedExamples](https://github.com/microsoft/DeepSpeedExamples)|训练、推理、测试|deepspeed|SFT、Reward Model、RLHF
+
+
+## 4 模型微调
+### 4.1 模型选择
 可以根据各大排行榜进行模型选择
 
 [hugging face通识能力排行](https://huggingface.co/spaces/open-llm-leaderboard/open_llm_leaderboard)
@@ -166,36 +174,39 @@ TODO
 **不建议使用llama3模型**，对中文的支持度较低。
 正在尝试qwen2-7B
 
-### 3.2 模型量化
+### 4.2 模型量化
 直接使用全量模型进行推理与训练具备较大的显存负担，例如qwen2-7B模型的推理峰值显存占用为25G，量化技术通过将模型的浮点数类型参数（bf16、fp16）转化为定点数（INT4、INT8）来降低显存负担。以下对各量化技术做简单罗列，**具体原理解析可参考量化原理文档**。
-#### 3.2.1 bnb量化
+#### 4.2.1 bnb量化
 bnb量化全称BitsAndBytes，原理为浮点数到定点数的直接映射。量化过程无需数据集辅助，量化后**模型大小变小，推理及训练速度提升**。
 ```bash
 pip install bitsandbytes
 ```
 **缺陷**： vllm不支持BNB量化，因此若采用vllm进行推理加速，不可使用bnb对模型进行量化
-#### 3.2.2 gptq量化
+#### 4.2.2 gptq量化
 gptq量化脱胎自模型剪枝算法，原理是尽可能缩小量化前后对模型loss的影响。因此存在loss计算过程，量化过程**需要数据集辅助**，量化后**模型大小变小。推理及训练速度显著下降**。
 ```bash
 pip install auto_gptq
 ```
 **缺陷**：因为GPTQ量化依赖于loss计算，且时间复杂度为O(N^3)，量化微调时间将显著增大。
-#### 3.2.3 awq量化
+#### 4.2.3 awq量化
 awq量化修改了GPTQ对权重的划分算法，在算法复杂度上与gptq一致，因此同样**需要数据集辅助**，量化后**模型大小变小。推理及训练速度显著下降**。
 ```bash
 pip install autoawq
 ```
 **缺陷1**：因为GPTQ量化依赖于loss计算，且时间复杂度为O(N^3)，量化微调时间将显著增大。
 **缺陷2**：autoawq库量化要求GPU算力达到7.5，V100无法满足该算力等级。
-#### 3.2.4 hqq量化
+#### 4.2.4 hqq量化
 hqq量化优化了bnb量化中零点与缩放倍数固定的问题，以量化和逆量化操作后的权重差异作为损失函数，以零点和缩放倍数作为参数进行训练，量化过程无需训练集辅助，量化后性能**本人尚未评估**，算力要求**尚未实践**。
 ```bash
 pip install hqq
 ```
+#### 4.2.5 量化修复
+**量化模型**极有可能产生`1.乱吐字`、`2.无限循环`、`3.长文能力丢失`等问题，有的模型在量化后不表现出这种问题，但在qlora后仍会出现该问题，对此需要对其进行**量化修复**。
+具体技术尚未知悉。
 
-### 3.3 分布式训练
-常用的分布式训练框架包括Deepspeed和colossalai
-#### 3.3.1 Deepspeed
+### 4.3 分布式
+常用的分布式框架包括Deepspeed和colossalai
+#### 4.3.1 Deepspeed
 Deepspeed是一个深度学习框架，支持多种分布式训练策略，如DDP、ZeRO等。其核心三种配置为zero1、zero2、zero3和offload。
 |优化选项|原理|速度排行排名|显存负担排名|
 |:---:|:---:|:---:|:---:|
@@ -207,30 +218,152 @@ Deepspeed是一个深度学习框架，支持多种分布式训练策略，如DD
 ```bash
 pip install deepspeed
 ```
-#### 3.3.2 colossalai
+#### 4.3.2 colossalai
 TODO 官方宣传其效率优于deepspeed。
+#### 4.3.3 ray
+vllm的分布式推理依赖ray架构。这里简单介绍一下使用ray启动vllm分布式推理。
+```bash
+pip install ray
+```
+```bash
+#manager上
+ray start --head --port=6379
+```
+```bash
+#worker上
+ray start --address=127.0.0.1:6379
+```
+```bash
+#manager上启动vllm分布式推理
+python -m vllm.entrypoints.api_server \
+    --model facebook/opt-13b \
+    --tensor-parallel-size 4
+```
 
-### 3.4 参数优化
-#### Lora
+### 4.4 参数优化
+#### 4.4.1 Lora
 Lora(Low-Rank Adaptation)将权重的更新分解为低秩矩阵B、A的乘积，从而极大降低需要更新的参数量，同时在实践中，lora并不会对模型的所有参数进行分解，基础的参数分解选项是注意力头中的qkv向量，在微调训练尤其是涉及到知识编辑、人类对齐领域，除了qkv还要对全连接层进行权重分解，以获得较好的效果。
 Lora的训练结果仅为权重的更新量，因此在保存时可以独立于基础模型本身保存。
 在swift框架中，预更新权重目标的选择可以通过AUTO和ALL切换。
-#### qlora
+#### 4.4.2 qlora
 在lora的基础上，将量化机制引入，并引入NF4数据类型、双量化和分页优化器，以减小训练显存负担。在使用中qlora可以做到无感使用。
-#### 模型融合
+#### 4.4.3 模型融合
 模型融合研究来自同基础架构的两个不同SFT模型之间的融合问题，通过融合两个模型，同时获得两种训练带来的优化知识。在lora的参数优化场景中，模型融合可以更具体地表现为融合多个lora壳为一个壳，使得最终模型具备处理多种任务的能力。
 虽然一种直观的融合方式是将多个壳进行简单地均值化，但这无疑会极大影响模型性能。学术界提出多种融合技术。
-##### SLERP
+以下技术的实现使用[mergekit库](https://github.com/arcee-ai/mergekit)
+```bash
+git clone https://github.com/arcee-ai/mergekit.git
+cd mergekit
+pip install -e .
+```
+使用方法为配置yml文件并使用mergekit-yaml脚本进行模型融合
+```bash
+mergekit-yaml path/to/your/config.yml ./output-model-directory [--cuda] [--lazy-unpickle] [--allow-crimes] [... other options]
+```
+##### 4.4.3.1 SLERP
+Spherical Linear Interpolation（SLERP）根据两个向量的方向进行插值合并，对于两个单位化的向量，若其夹角小于阈值，以较大向量作为线性插值，若夹角大于阈值，根据插值因子t计算两个向量的混合。SLERP是目前最流行的模型融合方法，速度快，但一次性仅能融合两个模型，对多个模型需要分批多次处理。
+配置示例（来自官方项目未实践）
+```yml
+slices:
+  - sources:
+      - model: psmathur/orca_mini_v3_13b
+        layer_range: [0, 40]
+      - model: garage-bAInd/Platypus2-13B
+        layer_range: [0, 40]
+# or, the equivalent models: syntax:
+# models:
+#   - model: psmathur/orca_mini_v3_13b
+#   - model: garage-bAInd/Platypus2-13B
+merge_method: slerp
+base_model: psmathur/orca_mini_v3_13b
+parameters:
+  t:
+    - filter: self_attn
+      value: [0, 0.5, 0.3, 0.7, 1]
+    - filter: mlp
+      value: [1, 0.5, 0.7, 0.3, 0]
+    - value: 0.5 # fallback for rest of tensors
+dtype: float16
+```
 
-##### TIES
+##### 4.4.3.2 TIES
+[TIES](https://arxiv.org/abs/2306.01708)认为模型参数中起关键作用的只有少部分参数，通过筛选不同模型的重要参数，将不重要参数更新重置为0，对冲突的参数选取最显著的作为主导。从而合并多个模型。论文中的图示可以很清晰地展现整个流程思路：
+![alt text](./resource/ties.png)
+配置示例（来自官方项目未实践）
+```yml
+models:
+  - model: psmathur/orca_mini_v3_13b
+    parameters:
+      density: [1, 0.7, 0.1] # density gradient
+      weight: 1.0
+  - model: garage-bAInd/Platypus2-13B
+    parameters:
+      density: 0.5
+      weight: [0, 0.3, 0.7, 1] # weight gradient
+  - model: WizardLM/WizardMath-13B-V1.0
+    parameters:
+      density: 0.33
+      weight:
+        - filter: mlp
+          value: 0.5
+        - value: 0
+merge_method: ties
+base_model: TheBloke/Llama-2-13B-fp16
+parameters:
+  normalize: true
+  int8_mask: true
+dtype: float16
+```
 
-##### DARE
+##### 4.4.3.3 DARE
+[DARE](https://arxiv.org/abs/2311.03099)遵照了TIES的基础假设，即模型参数中起关键作用的只有少部分参数，他通过随机将微调后的参数重置为基础模型参数，并使用缩放保持模型输出的期望稳定。官方的配图很逗，但不影响我们理解整个流程。
+![alt text](./resource/DARE.png)
+Mergekit 对这种方法的实现有两种：有 TIES 的确定符号步骤（dare_ties）或没有 TIES 的确定符号步骤（dare_linear）。
+配置示例（来自官方项目未实践）
+```yml
+models:
+ - model: mistralai/Mistral-7B-v0.1
+ # No parameters necessary for base model
+ - model: samir-fama/SamirGPT-v1
+ parameters:
+ density: 0.53
+ weight: 0.4
+ - model: abacusai/Slerp-CM-mist-dpo
+ parameters:
+ density: 0.53
+ weight: 0.3
+ - model: EmbeddedLLM/Mistral-7B-Merge-14-v0.2
+ parameters:
+ density: 0.53
+ weight: 0.3
+merge_method: dare_ties
+base_model: mistralai/Mistral-7B-v0.1
+parameters:
+ int8_mask: true
+dtype: bfloat16
+```
 
+##### 4.4.3.4 Passthrought
+Passthrought将不同LLM的网络层拼接起来，生成了参数规模变大的新模型（Frankenmerges），在[SOLAR 10.7B](https://arxiv.org/abs/2312.15166)中这一技术被称为depth-up scaling。
+显然这种模型融合方法有bu待tai研kao究pu，对合并模型的数量也有限制。
+配置示例（来自官方项目未实践）
+```yml
+slices:
+  - sources:
+    - model: OpenPipe/mistral-ft-optimized-1218
+      layer_range: [0, 32]
+  - sources:
+    - model: mlabonne/NeuralHermes-2.5-Mistral-7B
+      layer_range: [24, 32]
+merge_method: passthrough
+dtype: bfloat16
+```
 
-### 3.4 项目框架
-作为一个完整的大模型微调项目，必然包含了CFT、SFT、评估、推理、部署等一系列步骤，[swift]()
+#### 4.4.5 S-Lora
+对于多lora壳，除了模型融合，另一种部署思路是切换lora，[S-Lora](https://arxiv.org/abs/2311.03285)从内存分配机制上提供了一种多lora高效部署方案，主要的技术点包括PageAttention、Continous Batching。
+vllm已经支持S-Lora部署。
 
-### 3.5 模型推理
+## 模型推理
 
 ## 模型对齐
 
