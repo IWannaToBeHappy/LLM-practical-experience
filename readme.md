@@ -69,6 +69,7 @@
             }
         ]
     ```
+    注意到代码功能数据往往不尽人意，这里需要进一步进行标签设计。详见对齐数据准备。
 #### 2.1.1 self-instruct
 #### 2.1.2 evolve instruction
 ### 2.2 数据清洗
@@ -149,14 +150,18 @@ SFT数据占所有数据的比例建议为 **20%~40%**
 
 [hugging face](https://huggingface.co/)
 ### 2.5 对齐数据准备
-TODO
+行业对齐数据准备的基本思路是
 
 ## 3 项目框架
 一个完整的大模型微调项目，必然包含了CFT、SFT、评估、推理、部署等一系列步骤。有些框架专注于其中某一阶段，有些框架会嵌套使用其他框架，下面列出一系列了解到的框架。
 |框架名称|支持阶段|向上兼容|封装程度|特点|硬件要求|
-|---|---|---|---|---|
+|---|---|---|---|---|---|
 |[deepspeed](https://github.com/microsoft/DeepSpeed)|训练、推理、压缩|pytorch|封装到模型载入、分布式||NVIDIA: Pascal, Volta, Ampere, and Hopper architectures AMD: MI100 and MI200|
-|[DeepSpeedExamples](https://github.com/microsoft/DeepSpeedExamples)|训练、推理、测试|deepspeed|SFT、Reward Model、RLHF
+|[DeepSpeedExamples](https://github.com/microsoft/DeepSpeedExamples)|训练、推理、测试|deepspeed|SFT、Reward Model、RLHF||同Deepspeed|
+|[vllm](https://github.com/vllm-project/vllm)|推理|GPTQ、AWQ、SqueezeLLM、slora|模型一键载入|
+|[Llama-Factory](https://github.com/hiyouga/LLaMA-Factory)|CFT、SFT、奖励模型训练、PPO、DPO、KTO、ORPO、推理|vllm、deepspeed、flash-attn等|开箱即用||详见[官方readme](https://github.com/hiyouga/LLaMA-Factory/blob/main/README_zh.md)|依赖于具体技术|
+|[swift](https://github.com/modelscope/swift/tree/main)|CFT、SFT、INFER、RHLF、EVAL、DEPLOY|peft、vllm、deepspeed等|开箱即用||V100、A10/A100、RTX20/30/40|
+
 
 
 ## 4 模型微调
@@ -194,6 +199,7 @@ awq量化修改了GPTQ对权重的划分算法，在算法复杂度上与gptq一
 pip install autoawq
 ```
 **缺陷1**：因为GPTQ量化依赖于loss计算，且时间复杂度为O(N^3)，量化微调时间将显著增大。
+
 **缺陷2**：autoawq库量化要求GPU算力达到7.5，V100无法满足该算力等级。
 #### 4.2.4 hqq量化
 hqq量化优化了bnb量化中零点与缩放倍数固定的问题，以量化和逆量化操作后的权重差异作为损失函数，以零点和缩放倍数作为参数进行训练，量化过程无需训练集辅助，量化后性能**本人尚未评估**，算力要求**尚未实践**。
@@ -289,6 +295,7 @@ dtype: float16
 ##### 4.4.3.2 TIES
 [TIES](https://arxiv.org/abs/2306.01708)认为模型参数中起关键作用的只有少部分参数，通过筛选不同模型的重要参数，将不重要参数更新重置为0，对冲突的参数选取最显著的作为主导。从而合并多个模型。论文中的图示可以很清晰地展现整个流程思路：
 ![alt text](./resource/ties.png)
+
 配置示例（来自官方项目未实践）
 ```yml
 models:
@@ -364,12 +371,30 @@ dtype: bfloat16
 vllm已经支持S-Lora部署。
 
 ## 模型推理
+### vllm
+vllm可以将大模型推理速度加快50倍（实测）！
+其核心要点在于PagedAttention机制，它将大模型中的attention层拆分为多个page，每个page只包含部分attention权重，从而实现对大模型的高效推理。
+另外，CUDA|HIP图构建也极大加速了模型推理，以及优化的CUDA核。
+```bash
+pip install vllm
+```
+在swift中可以选择后端为vllm，在python代码中可以将模型快捷包装成engine。
+```python
+from vllm import LLM,SamplingParams
+sampling_params = SamplingParams(temperature=0.8,top_p=0.95,top_k=40,no_repeat_ngram_size=2)
+llm = LLM("some_supported_model")
+outputs = llm.generate(prompts,sampling_params)
+for output in outputs:
+    prompt = output.prompt
+    generated_text = output.outputs[0].text
+```
+
 
 ## 模型对齐
 
 ## prompt优化
-
+TODO
 ## 模型部署
-
+TODO
 思考模型 思考过程训练（Agent），方式：读说明书，学习工具使用
 代码智能体：大模型生成思考，写代码，提交给代码生成、代码执行、返回代码结果给大模型，进行下一步迭代。
