@@ -411,6 +411,7 @@ vllm已经支持S-Lora部署。
 ## 模型推理
 ### vllm
 vllm可以将大模型推理速度加快50倍（实测）！
+vllm背后的技术原理可以参考https://www.aleksagordic.com/blog/vllm#cpt1
 其核心要点在于PagedAttention机制，它将大模型中的attention层拆分为多个page，每个page只包含部分attention权重，从而实现对大模型的高效推理。
 另外，CUDA|HIP图构建也极大加速了模型推理，以及优化的CUDA核。
 ```bash
